@@ -38,17 +38,47 @@ team_t team = {
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
 
-/* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+/* rounds up to the nearest multiple of ALIGNMENT */ // alignment의 배수로 올림한다.
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7) // 8로나눈 나머지 전부 제거!
 
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t))) // size_t -> 메모리블럭의 크기를 반환한다. 32비트면 4바이트, 64비트면 8바이트
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+/*헤더와 푸터의 사이즈 & 워드 사이즈*/
+#define W_SIZE 4
+/*더블 워드 사이즈*/
+#define D_SIZE 8
+
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+
+/*alloc에 있는 비트 더해주기*/
+#define PACK(size, alloc) ((size) | (alloc))
+
+/*주소 p에 있는 값 읽고 쓰기*/
+#define GET(p) (*(unsigned int *)(p))
+#define PUT(p, val) (*(unsigned int *)(p) = (val))
+
+/*주소 p에 있는 size, allocated 필드 읽기*/
+#define GET_SIZE(p) (GET(p) & ~0x7)
+#define GET_ALLOC(p) (GET(p) & ~0x1)
+
+/*블록의 포인터가 주어질 시 (bp), 헤더와 푸터의 주소 계산*/
+#define HDR_P(bp) ((char *)(bp) - W_SIZE)
+#define FTR_P(bp) ((char *)(bp) + GET_SIZE(HDR_P(bp)) - D_SIZE)
+
+/*현재 블록의 포인터가 주어질 시, 다음 블록의 포인터, 이전 블록의 포인터*/
+#define NEXT_BLK_P(bp) ((char *)(bp) + GET_SIZE((char *)(bp - W_SIZE)))
+#define PREV_BLK_P(bp) ((char *)(bp) - GET_SIZE((char *)(bp - D_SIZE)))
 
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+    /* 초기 상태의 빈 heap을 만들어준다. */
+
+    if ((heap_listp = mem_sbrk(4*W_SIZE)) == (void *)-1)
+        return -1;
+
     return 0;
 }
 
