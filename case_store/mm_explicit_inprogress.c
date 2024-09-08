@@ -91,10 +91,14 @@ static void insert_link(void *pos) {
         PUT_ADD(pos, GET_ADD(root)); 
     }
     PUT_ADD(pos + W_SIZE, root);
+    printf("insert01 : %p , %p \n", pos, GET_ADD(root));
+    printf("insert02 : %p , %p \n", pos + W_SIZE, root);
 
     PUT_ADD(root, pos); // 기존 블록 연결 재설정
+    printf("insert03 : %p , %p \n", root, pos);
     if (GET_ADD(pos) != NULL) {
         PUT_ADD(GET_ADD(pos)+W_SIZE, pos + W_SIZE);
+        printf("insert04 : %p , %p \n", GET_ADD(pos)+W_SIZE, pos + W_SIZE);
     }
 }
 
@@ -104,9 +108,13 @@ static void insert_link(void *pos) {
  */
 
 static void rearrange_link(void *pos) {
+    printf("rearrange_start: %p\n", pos);
+    printf("rearrange_start_val: %p\n", GET_ADD(pos));
     if (GET_ADD(pos+W_SIZE) == root) {
+        printf("rearrange_link bye\n");
         return;
     }
+    printf("rearrange_effect: %p\n", pos);
     PUT_ADD(GET_ADD(pos+W_SIZE)-W_SIZE, GET_ADD(pos)); // 병합되서 없어질 블록의 전과 후를 이어준다.
     if (GET_ADD(pos) != NULL) {
         PUT_ADD(GET_ADD(pos)+W_SIZE, GET_ADD(pos+W_SIZE));
@@ -120,6 +128,10 @@ static void rearrange_link(void *pos) {
 static void shift_link(void *pos) {
     PUT_ADD(NEXT_BLK_P(pos), GET_ADD(pos)); // free된 블록에 shift 전 값을 복사한다.
     PUT_ADD(NEXT_BLK_P(pos) + W_SIZE, GET_ADD(pos+W_SIZE));
+    printf("shift01 : %p , %p \n", NEXT_BLK_P(pos), GET_ADD(pos));
+    printf("shift02 : %p , %p \n", NEXT_BLK_P(pos) + W_SIZE, GET_ADD(pos+W_SIZE));
+    // printf("shift1 : %p\n", GET_ADD(NEXT_BLK_P(pos)));
+    // printf("shift2 : %p\n", GET_ADD(NEXT_BLK_P(pos) + W_SIZE));
     
     // 연결된 블록의 값들도 바꿔준다.
     if (GET_ADD(pos) != NULL) { // 해당 블록 다음 값이 NULL이 아니면 수행
@@ -138,6 +150,7 @@ static void shift_link(void *pos) {
  */
 
 static void * coalesce(void *bp) {
+    printf("coalesce start\n");
     void *prev_bp = PREV_BLK_P(bp);
     void *next_bp = NEXT_BLK_P(bp);
     size_t prev_alloc = GET_ALLOC(FTR_P(prev_bp));
@@ -145,6 +158,7 @@ static void * coalesce(void *bp) {
     size_t size = GET_SIZE(HDR_P(bp));
     if (prev_alloc && next_alloc) { // case 1 : 위아래 모두 차있을 경우
         /*explicit 추가 로직*/
+        printf("coalesce 11\n");
         insert_link(bp);
         return bp;
     } 
@@ -152,6 +166,8 @@ static void * coalesce(void *bp) {
         size += GET_SIZE(HDR_P(NEXT_BLK_P(bp)));
         PUT(HDR_P(bp), PACK(size, 0));
         PUT(FTR_P(bp), PACK(size, 0));
+        printf("next_bp : %p\n", GET_ADD(next_bp));
+        printf("coalesce 21\n");
         /*explicit 추가 로직*/
         rearrange_link(next_bp);
         insert_link(bp);
@@ -161,6 +177,7 @@ static void * coalesce(void *bp) {
         PUT(FTR_P(bp), PACK(size, 0));
         PUT(HDR_P(PREV_BLK_P(bp)), PACK(size, 0));
         bp = prev_bp;
+        printf("coalesce 31\n");
         /*explicit 추가 로직*/
         rearrange_link(bp);
         insert_link(bp);
@@ -170,11 +187,13 @@ static void * coalesce(void *bp) {
         PUT(HDR_P(PREV_BLK_P(bp)), PACK(size, 0));
         PUT(FTR_P(NEXT_BLK_P(bp)), PACK(size, 0));
         bp = prev_bp;
+        printf("coalesce 41\n");
         /*explicit 추가 로직*/
         rearrange_link(bp);
         rearrange_link(next_bp);
         insert_link(bp);
     }
+    printf("coalesce end\n");
     return bp;
 }
 
@@ -227,7 +246,11 @@ int mm_init(void)
     /*explicit 추가로직*/
     PUT_ADD(root+(4*W_SIZE), NULL); // 초기 free 블록 헤더 다음 위치에 NULL을 넣어준다.
     PUT_ADD(root+(5*W_SIZE), root); // 초기 free 블록 헤더 다다음 위치에 root의 주솟값을 넣어준다.
+    printf("root = %p\n", root);
+    printf("GET_ADD(root) = %p\n", GET_ADD(root));
+    printf("(root+(4*W_SIZE) = %p\n", (root+(4*W_SIZE)));
 
+    
     return 0;
 }
 
@@ -238,13 +261,19 @@ int mm_init(void)
  */
 static void *find_fit(size_t asize) {
     char *find_pos = GET_ADD(root);
+    printf("root = %p\n", root);
+    printf("find_pos = %p\n", find_pos);
     while (GET_ADD(find_pos) != NULL) { // 마지막 도달 전까지
         if(GET_SIZE(HDR_P(find_pos)) < asize) { // 블록의 크기가 asize 보다 작으면 다음 탐색
             find_pos = GET_ADD(find_pos);
+            printf("next find_pos = %p\n", GET_ADD(find_pos));
+
         } else {
+            printf("fixed find_pos = %p\n", GET_ADD(find_pos));
             return find_pos;
         }
     }
+    printf("no found!\n");
     return NULL;
 }
 
@@ -254,6 +283,7 @@ static void *find_fit(size_t asize) {
  * 나머지 부분의 크기가 최소 블록 크기와 같거나 큰 경우 분할한다.
  */
 static void place(void *bp, size_t asize) {
+    printf("place start\n");
     char *hdr_pos = HDR_P(bp);
     char *ftr_pos = FTR_P(bp);
     size_t size = GET_SIZE(hdr_pos);
@@ -269,6 +299,8 @@ static void place(void *bp, size_t asize) {
         PUT(ftr_pos, PACK(size, 1));
         PUT(next_hdr_pos, PACK(next_size, 0));
         PUT(next_ftr_pos, PACK(next_size, 0));
+        printf("place 11\n");
+        printf("splitted pos: %p\n", NEXT_BLK_P(bp));
         /*explicit 추가 로직*/
         shift_link(bp);
     } else { // 분할 안되는 경우
@@ -278,13 +310,34 @@ static void place(void *bp, size_t asize) {
         /*explicit 추가 로직*/
         rearrange_link(bp);
     }
+    printf("place end\n");
 }
+
+/*
+static void place(void *bp, size_t asize) {
+    size_t csize = GET_SIZE(HDR_P(bp));
+
+    if((csize - asize) >= (2*D_SIZE)) {
+        PUT(HDR_P(bp), PACK(asize, 1));
+        PUT(FTR_P(bp), PACK(asize, 1));
+        bp = NEXT_BLK_P(bp);
+        PUT(HDR_P(bp), PACK(csize-asize, 0));
+        PUT(FTR_P(bp), PACK(csize-asize, 0));
+    }
+    else {
+        PUT(HDR_P(bp), PACK(csize, 1));
+        PUT(FTR_P(bp), PACK(csize, 1));
+    }
+}
+*/
 
 /* 
  * mm_malloc - Allocate a block by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
+    printf("----------------------------------------------\n");
+    printf("malloc start 1\n");
     size_t asize;
     size_t extendsize;
     char *bp;
@@ -318,6 +371,8 @@ void *mm_malloc(size_t size) {
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
+    printf("----------------------------------------------\n");
+    printf("free start 1\n");
     size_t size = GET_SIZE(HDR_P(ptr));
 
     PUT(HDR_P(ptr), PACK(size, 0));
