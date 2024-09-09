@@ -81,69 +81,60 @@ static char *root;
 
 static char *heap_listp; // 프롤로그 푸터 위치로 초기화된다.
 
-// /**
-//  * insert_link
-//  */
+static int cnt = 0;
+
+/**
+ * insert_link
+ */
+
 static void insert_link(void *pos) {
-    void *first_block = GET_ADD(root);
-
-    // 새로운 블록의 next와 prev 포인터 설정
-    PUT_ADD(pos, first_block); // pos->next = first_block
-    PUT_ADD(pos + W_SIZE, NULL); // pos->prev = NULL
-
-    // 기존 첫 번째 블록의 prev 포인터 업데이트
-    if (first_block != NULL) {
-        PUT_ADD(first_block + W_SIZE, pos); // first_block->prev = pos
-    }
-
-    // root를 새로운 블록으로 업데이트
-    PUT_ADD(root, pos);
-}
-
-// /**
-//  * rearrange_link
-//  * 병합되는 free 블록의 전후 블록을 연결해준다.
-//  */
-static void rearrange_link(void *pos) {
-    void *next_block = GET_ADD(pos); // 다음 free 블록
-    void *prev_block = GET_ADD(pos + W_SIZE); // 이전 free 블록
-
-    // 블록을 리스트에서 제거
-    if (prev_block != NULL) {
-        PUT_ADD(prev_block, next_block); // 이전 블록의 next = 다음 블록
+    if(pos == GET_ADD(root)) { // 새로 추가된 블록에 연결 추가
+        PUT_ADD(pos, NULL);
     } else {
-        // 이전 블록이 없으면 root 업데이트
-        PUT_ADD(root, next_block);
+        PUT_ADD(pos, GET_ADD(root)); 
     }
+    PUT_ADD(pos + W_SIZE, root);
 
-    if (next_block != NULL) {
-        PUT_ADD(next_block + W_SIZE, prev_block); // 다음 블록의 prev = 이전 블록
+    PUT_ADD(root, pos); // 기존 블록 연결 재설정
+    if (GET_ADD(pos) != NULL) {
+        PUT_ADD(GET_ADD(pos)+W_SIZE, pos + W_SIZE);
     }
 }
 
-// /**
-//  * shift_link
-//  */
+/**
+ * rearrange_link
+ * 병합되는 free 블록의 전후 블록을 연결해준다.
+ */
+
+static void rearrange_link(void *pos) {
+    if (GET_ADD(pos+W_SIZE) != root) {
+        PUT_ADD(GET_ADD(pos+W_SIZE)-W_SIZE, GET_ADD(pos)); // 병합되서 없어질 블록의 전과 후를 이어준다.
+    }
+    if (GET_ADD(pos) != NULL) {
+        PUT_ADD(GET_ADD(pos)+W_SIZE, GET_ADD(pos+W_SIZE));
+    }
+}
+
+/**
+ * shift_link
+ */
 
 static void shift_link(void *pos) {
-    void *next_free = GET_ADD(pos);
-    void *prev_free = GET_ADD(pos + W_SIZE);
-    void *new_free_block = NEXT_BLK_P(pos);
-
-    // 새로운 free 블록의 next와 prev 포인터 설정
-    PUT_ADD(new_free_block, next_free);
-    PUT_ADD(new_free_block + W_SIZE, prev_free);
-
-    // 인접한 블록들의 포인터 업데이트
-    if (prev_free != NULL) {
-        PUT_ADD(prev_free, new_free_block);
-    } else {
-        PUT_ADD(root, new_free_block);
+    PUT_ADD(NEXT_BLK_P(pos), GET_ADD(pos)); // free된 블록에 shift 전 값을 복사한다.
+    PUT_ADD(NEXT_BLK_P(pos) + W_SIZE, GET_ADD(pos+W_SIZE));
+    printf("shift01 : %p , %p \n", NEXT_BLK_P(pos), GET_ADD(pos));
+    printf("shift02 : %p , %p \n", NEXT_BLK_P(pos) + W_SIZE, GET_ADD(pos+W_SIZE));
+    
+    // 연결된 블록의 값들도 바꿔준다.
+    if (GET_ADD(pos) != NULL) { // 해당 블록 다음 값이 NULL이 아니면 수행
+        PUT_ADD(GET_ADD(pos)+W_SIZE, NEXT_BLK_P(pos) + W_SIZE); 
     }
-
-    if (next_free != NULL) {
-        PUT_ADD(next_free + W_SIZE, new_free_block);
+    if (GET_ADD(pos+W_SIZE) == root) { // 해당 블록 이전 값이 root이면
+        PUT_ADD(root, NEXT_BLK_P(pos));
+    } else { // root가 아니면
+        PUT_ADD(GET_ADD(pos+W_SIZE)-W_SIZE, NEXT_BLK_P(pos));
     }
+    
 }
 
 /**
@@ -151,17 +142,20 @@ static void shift_link(void *pos) {
  */
 
 static void * coalesce(void *bp) {
+    printf("coalesce start\n");
     char *prev_bp = PREV_BLK_P(bp);
     char *next_bp = NEXT_BLK_P(bp);
     size_t prev_alloc = GET_ALLOC(FTR_P(prev_bp));
     size_t next_alloc = GET_ALLOC(HDR_P(next_bp));
     size_t size = GET_SIZE(HDR_P(bp));
     if (prev_alloc && next_alloc) { // case 1 : 위아래 모두 차있을 경우
+    printf("coalesce case1\n");
         /*explicit 추가 로직*/
         insert_link(bp);
         return bp;
     } 
     else if (prev_alloc && !next_alloc) { // case 2 : 위는 차있고 아래가 빈 경우
+    printf("coalesce case2\n");
         size += GET_SIZE(HDR_P(NEXT_BLK_P(bp)));
         PUT(HDR_P(bp), PACK(size, 0));
         PUT(FTR_P(bp), PACK(size, 0));
@@ -170,24 +164,26 @@ static void * coalesce(void *bp) {
         insert_link(bp);
     } 
     else if (!prev_alloc && next_alloc) { // case 3 : 위는 비었고 아래가 차있는 경우
+    printf("coalesce case3\n");
         size += GET_SIZE(HDR_P(PREV_BLK_P(bp)));
         PUT(FTR_P(bp), PACK(size, 0));
         PUT(HDR_P(PREV_BLK_P(bp)), PACK(size, 0));
-        bp = PREV_BLK_P(bp);
+        bp = prev_bp;
         /*explicit 추가 로직*/
         rearrange_link(bp);
         insert_link(bp);
     }
     else { // case 4 : 위 아래 모두 빈 경우
-        size += GET_SIZE(HDR_P(PREV_BLK_P(bp))) + GET_SIZE(HDR_P(NEXT_BLK_P(bp)));
-        PUT(HDR_P(PREV_BLK_P(bp)), PACK(size, 0));
-        PUT(FTR_P(NEXT_BLK_P(bp)), PACK(size, 0));
-        bp = PREV_BLK_P(bp);
-        /*explicit 추가 로직*/
-        rearrange_link(next_bp);
-        rearrange_link(prev_bp); 
-        insert_link(bp);
+    printf("coalesce case4\n");
+    rearrange_link(next_bp);
+    rearrange_link(prev_bp); // 위 블록도 리스트에서 제거
+    size += GET_SIZE(HDR_P(PREV_BLK_P(bp))) + GET_SIZE(HDR_P(NEXT_BLK_P(bp)));
+    PUT(HDR_P(PREV_BLK_P(bp)), PACK(size, 0));
+    PUT(FTR_P(NEXT_BLK_P(bp)), PACK(size, 0));
+    bp = PREV_BLK_P(bp);
+    insert_link(bp); // 병합된 블록을 리스트에 다시 삽입
     }
+    printf("HDR : %p, FTR : %p, new_size : %d \n",HDR_P(bp), FTR_P(bp) ,size);
     return bp;
 }
 
@@ -210,6 +206,7 @@ static void *extend_heap(size_t words) {
     PUT(HDR_P(bp), PACK(size, 0));
     PUT(FTR_P(bp), PACK(size, 0));
     PUT(HDR_P(NEXT_BLK_P(bp)), PACK(0, 1));
+    printf("HDR : %p, FTR : %p, new_size : %d \n",HDR_P(bp), FTR_P(bp) ,size);
 
     /*이전 블록이 free면, 합친다*/
     return coalesce(bp);
@@ -239,7 +236,7 @@ int mm_init(void)
 
     /*explicit 추가로직*/
     PUT_ADD(root+(4*W_SIZE), NULL); // 초기 free 블록 헤더 다음 위치에 NULL을 넣어준다.
-    PUT_ADD(root+(5*W_SIZE), NULL); // 초기 free 블록 헤더 다다음 위치에 NULL을 넣어준다.
+    PUT_ADD(root+(5*W_SIZE), root); // 초기 free 블록 헤더 다다음 위치에 root의 주솟값을 넣어준다.
 
     return 0;
 }
@@ -248,37 +245,18 @@ int mm_init(void)
  * find_fit : 
  * 명시적 가용 리스트에서 first_fit 검색을 한다.
  * free 되어있는 것들만 순회한다.
- */ 
-
-// firstfit 사용 시 메모리 초과
-// static void *find_fit(size_t asize) {
-//     char *find_pos = GET_ADD(root);
-
-//     while (GET_ADD(find_pos) != NULL ) { // 마지막 도달 전까지
-//         if(GET_SIZE(HDR_P(find_pos)) < asize) { // 블록의 크기가 asize 보다 작으면 다음 탐색
-//             find_pos = GET_ADD(find_pos);
-//         } else {
-//             return find_pos;
-//         }
-//     }
-//     return NULL;
-// }
-
-// bestfit 사용
-void *find_fit(size_t size) {
-    void *best_fit = NULL;
-    size_t min_diff = (size_t) -1;  // 가능한 가장 큰 차이 값으로 초기화
-
-    for (void *find_pos = GET_ADD(root); find_pos != NULL; find_pos = GET_ADD(find_pos)) {
-        size_t current_size = GET_SIZE(HDR_P(find_pos));
-
-        if (current_size >= size && (current_size - size) < min_diff) {
-            best_fit = find_pos;
-            min_diff = current_size - size;
+ */
+static void *find_fit(size_t asize) {
+    printf("find_fit start\n");
+    char *find_pos = GET_ADD(root);
+    while (GET_ADD(find_pos) != NULL) { // 마지막 도달 전까지
+        if(GET_SIZE(HDR_P(find_pos)) < asize) { // 블록의 크기가 asize 보다 작으면 다음 탐색
+            find_pos = GET_ADD(find_pos);
+        } else {
+            return find_pos;
         }
     }
-    
-    return best_fit;
+    return NULL;
 }
 
 /**
@@ -287,25 +265,40 @@ void *find_fit(size_t size) {
  * 나머지 부분의 크기가 최소 블록 크기와 같거나 큰 경우 분할한다.
  */
 static void place(void *bp, size_t asize) {
+    printf("place start\n");
     char *hdr_pos = HDR_P(bp);
     char *ftr_pos = FTR_P(bp);
     size_t size = GET_SIZE(hdr_pos);
 
-    if ( size - asize >= ALIGNMENT*2) { // 분할되는 경우
+    printf("hdr_pos : %p, ftr_pos %p \n", hdr_pos, ftr_pos);
+    long diff2 = (long)((char *)ftr_pos - (char *)hdr_pos);
+    printf("diff2 : %ld \n", diff2);
+    if ( size >= ALIGNMENT*2 + asize) { // 분할되는 경우
+        printf("place case1\n");
         size = asize;
+        printf("GET_SIZE(hdr_pos) : %d \n", GET_SIZE(hdr_pos));
         size_t next_size = GET_SIZE(hdr_pos) - asize;
         ftr_pos = hdr_pos + size - W_SIZE;
         char *next_hdr_pos = hdr_pos + asize;
         char *next_ftr_pos = next_hdr_pos + next_size - W_SIZE;
 
+        printf("place case1?\n");
         PUT(hdr_pos, PACK(size, 1));
         PUT(ftr_pos, PACK(size, 1));
+        printf("place case1??\n");
+        printf("hdr_pos : %p, ftr_pos %p \n", hdr_pos, ftr_pos);
+        printf("size : %d \n", size);
+        printf("next_hdr_pos : %p, next_ftr_pos %p \n", next_hdr_pos, next_ftr_pos);
+        printf("next_size : %d \n", next_size);
+        printf("last_pos : %p \n", mem_heap_hi());
         PUT(next_hdr_pos, PACK(next_size, 0));
         PUT(next_ftr_pos, PACK(next_size, 0));
+        printf("next_hdr_pos_size : %d, next_ftr_pos_size %d \n", GET_SIZE(next_hdr_pos), GET_SIZE(next_ftr_pos));
         
         /*explicit 추가 로직*/
         shift_link(bp);
     } else { // 분할 안되는 경우
+        printf("place case2\n");
         PUT(hdr_pos, PACK(size, 1));
         PUT(ftr_pos, PACK(size, 1));
 
@@ -319,6 +312,8 @@ static void place(void *bp, size_t asize) {
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
+    printf("----------------------------------------------------------\n");
+    printf("mm_malloc start : %d \n", cnt++);
     size_t asize;
     size_t extendsize;
     char *bp;
@@ -352,6 +347,8 @@ void *mm_malloc(size_t size) {
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
+    printf("----------------------------------------------------------\n");
+    printf("mm_free start : %d \n", cnt++);
     size_t size = GET_SIZE(HDR_P(ptr));
 
     PUT(HDR_P(ptr), PACK(size, 0));
