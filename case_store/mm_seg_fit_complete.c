@@ -111,6 +111,11 @@ static void rearrange_list(void *pos, int idx) {
     }
 }
 
+/**
+ * get_idx
+ * 사이즈에 맞는 인덱스를 출력한다.
+ */
+
 int get_idx(size_t size) {
     int idx;
     if (size <= 16) {

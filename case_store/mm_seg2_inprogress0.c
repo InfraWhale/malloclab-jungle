@@ -49,7 +49,12 @@ team_t team = {
 /*더블 워드 사이즈*/
 #define D_SIZE 8
 
+/*이만큼 확장한다 (4KB)*/
+#define CHUNKSIZE (1 << 12) 
+
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define LOG(size) ((int)(log(size) / log(2)))
+#define POW(val) ((int)(pow(2, val)))
 
 /*alloc에 있는 비트 더해주기*/
 #define PACK(size, alloc) ((size) | (alloc))
@@ -77,34 +82,25 @@ team_t team = {
 
 static char *root; // heap의 시작 지점을 저장한다.
 
-/**
- * insert list
- * 리스트에 가용 블록을 추가해준다.
- */
 static void insert_list(void *pos, int idx) {
-
+    printf("insert_link start\n");
+    printf("idx : %d\n", idx);
     PUT_ADD(pos, GET_ADD(root+(idx*W_SIZE)));
     PUT_ADD(pos+W_SIZE, NULL);
     
     PUT_ADD(root+(idx*W_SIZE), pos);
-
+    printf("root next pos : %p\n", GET_ADD(root+(idx*W_SIZE)));
     if(GET_ADD(pos) != NULL) {
-        PUT_ADD(GET_ADD(pos)+W_SIZE, pos);
+        PUT_ADD(GET_ADD(pos), pos);
     }
-
 }
 
-/**
- * rearrange_list
- * 리스트에 가용 블록이 빠진 경우 전, 후를 이어준다.
- */
 static void rearrange_list(void *pos, int idx) {
-
     if(GET_ADD(pos+W_SIZE) != NULL) {
-        
         PUT_ADD(GET_ADD(pos+W_SIZE), GET_ADD(pos));
     } else {
         PUT_ADD(root+(idx*W_SIZE), GET_ADD(pos));
+        printf("root next pos : %p\n", GET_ADD(root+(idx*W_SIZE)));
     }
     if(GET_ADD(pos) != NULL) {
         PUT_ADD(GET_ADD(pos)+W_SIZE, GET_ADD(pos+W_SIZE));
@@ -128,14 +124,15 @@ int get_idx(size_t size) {
 /**
  * extend_heap
  */
-static void *extend_heap(size_t words) {
+static void *extend_heap(size_t size) {
+    printf("extend_heap start\n");
     char *bp;
-    size_t size;
-    
-    /* words를 짝수로 만들어주고 연산한다. */
-    size = (words % 2) ? (words+1) * W_SIZE : words * W_SIZE;
-
     int idx = get_idx(size);
+    //printf("idx : %d\n", idx);
+    
+    if (size < 16) {
+        size = 16;
+    }
 
     /*heap 사이즈를 늘려준다.*/
     if ((long)(bp = mem_sbrk(size)) == -1)
@@ -143,6 +140,7 @@ static void *extend_heap(size_t words) {
     
     /* free block 헤더를 초기화한다.*/
     PUT(HDR_P(bp), PACK(size, 0));
+    PUT(FTR_P(bp), PACK(size, 0));
     PUT(HDR_P(NEXT_BLK_P(bp)), PACK(0, 1));
 
     /* 새로 할당받은 블럭을 가용리스트에 추가한다 .*/
@@ -156,11 +154,13 @@ static void *extend_heap(size_t words) {
  */
 int mm_init(void)
 {   
+    printf("-------------------------------------\n");
+    printf("init start\n");
     /* 초기 상태의 빈 heap을 만들어준다. */
     if ((root = mem_sbrk(20*W_SIZE)) == (void *)-1)
         return -1;
-
-    /* 19개의 리스트를 전부 NULL로 초기화한다. */
+    printf("root_pos : %p\n", root);
+    /* 20개의 리스트를 전부 NULL로 초기화한다. */
     // root -> 1~2^4
     // root + W_SIZE -> (2^4)+1 ~ 2^5
     // ...
@@ -170,6 +170,7 @@ int mm_init(void)
         PUT_ADD(root+(i*W_SIZE), NULL);
     }
     PUT(root + (19*W_SIZE), PACK(0, 1)); // 에필로그 헤더
+    printf("last_root_pos : %p\n", root+(18*W_SIZE));
 
     return 0;
 }
@@ -180,16 +181,22 @@ int mm_init(void)
  * 없으면 NULL을 출력한다.
  */ 
 void *find_fit(size_t size) {
+    printf("find_fit start\n");
     int idx = get_idx(size);
+    printf("first idx : %d\n", idx);
     char * find_pos = NULL;
 
     for(int i = idx; i < 19; i++) {
+        printf("idx : %d\n", i);
         find_pos = GET_ADD(root + (i*W_SIZE));
+        printf("pos first! : %p\n", find_pos);
         while(find_pos != NULL) {
             if(GET_SIZE(HDR_P(find_pos)) >= size) {
+                printf("pos get! : %p\n", find_pos);
                 return find_pos;
             } else {
                 find_pos = GET_ADD(find_pos);
+                printf("pos next : %p\n", find_pos);
             }
         }
     }
@@ -203,24 +210,33 @@ void *find_fit(size_t size) {
  * 분할 가능하면 분할한다.
  */
 static void place(void *bp, size_t asize) {
+    printf("place start\n");
     char *hdr_pos = HDR_P(bp);
+    char *ftr_pos = FTR_P(bp);
+    printf("hdr_pos : %p, ftr_pos : %p\n", hdr_pos, ftr_pos);
     size_t size = GET_SIZE(hdr_pos);
-    int idx = get_idx(size);
+    int idx = get_idx(asize);
 
     if ( size - asize >= 16) { // 분할되는 경우
+        printf("place case1 \n");
+        ftr_pos = hdr_pos + asize - W_SIZE;
         PUT(hdr_pos, PACK(asize, 1));
+        PUT(ftr_pos, PACK(asize, 1));
 
         size_t next_size = size - asize;
         char *next_pos = NEXT_BLK_P(bp);
 
         PUT(HDR_P(next_pos), PACK(next_size, 0));
+        PUT(FTR_P(next_pos), PACK(next_size, 0));
 
         /*분할된 블록을 해당 리스트에 할당*/
         int next_idx = get_idx(next_size);
         insert_list(next_pos, next_idx);
 
     } else { // 분할안되는 경우
+        printf("place case2 \n");
         PUT(hdr_pos, PACK(size, 1));
+        PUT(ftr_pos, PACK(size, 1));
     }
 
     /*빠진 블록의 전후를 이어줌*/
@@ -232,30 +248,26 @@ static void place(void *bp, size_t asize) {
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
-    size_t asize;
+    printf("-------------------------------------\n");
+    printf("malloc start\n");
     char *bp;
 
     if (size == 0) {
         return NULL;
     }
 
-    if (size <= D_SIZE)
-        asize = 2 * D_SIZE;
-    else
-        asize = D_SIZE * ((size + (D_SIZE) + (D_SIZE)) / D_SIZE);
-
     /* 리스트에 있는지 찾기*/
-    if ((bp = find_fit(asize)) != NULL) {
-        place(bp, asize);
+    if ((bp = find_fit(size)) != NULL) {
+        place(bp, size);
         return bp;
     }
 
     /* 못찾으면 힙 확장하고 블록 추가*/
-    if ((bp = extend_heap(asize/W_SIZE)) == NULL) {
+    if ((bp = extend_heap(size)) == NULL) {
         return NULL;
     }
 
-    place(bp, asize);
+    place(bp, size);
     return bp;
 }
 
@@ -263,58 +275,36 @@ void *mm_malloc(size_t size) {
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
+    printf("-------------------------------------\n");
+    printf("free start\n");
     size_t size = GET_SIZE(HDR_P(ptr));
     int idx = get_idx(size);
     PUT(HDR_P(ptr), PACK(size, 0));
+    PUT(FTR_P(ptr), PACK(size, 0));
 
     /* 새 가용 블럭을 리스트에 추가한다 .*/
     insert_list(ptr, idx);
 }
 
-void *mm_realloc(void *ptr, size_t size) {
-    if (ptr == NULL) {
-        return mm_malloc(size); // 새로운 메모리 할당
-    }
-
-    if (size == 0) {
-        mm_free(ptr);
-        return NULL;
-    }
-
-    size_t old_size = GET_SIZE(HDR_P(ptr));
-    size_t new_size = ALIGN(size + SIZE_T_SIZE);
-
-    // 블록 크기가 충분하면 그대로 반환
-    if (new_size <= old_size) {
-        return ptr;
-    }
-
-    // 블록이 힙의 끝에 있는지 확인 (다음 블록이 에필로그 블록인지 체크)
-    if (GET_SIZE(HDR_P(NEXT_BLK_P(ptr))) == 0 && GET_ALLOC(HDR_P(NEXT_BLK_P(ptr)))) {
-        size_t extend_size = new_size - old_size;
-
-        // 힙을 확장하여 필요한 크기만큼 늘릴 수 있는지 확인
-        if ((long)mem_sbrk(extend_size) == -1) {
-            return NULL;  // 힙 확장 실패 시 NULL 반환
-        }
-
-        // 블록의 크기를 확장하고 헤더와 푸터, 에필로그 헤더 업데이트
-        PUT(HDR_P(ptr), PACK(new_size, 1));
-        PUT(HDR_P(NEXT_BLK_P(ptr)), PACK(0, 1));
-        return ptr;  // 재할당 없이 확장 완료
-    }
-
-    // 힙 끝이 아니면 기존 방식으로 재할당 수행
-    void *new_ptr = mm_malloc(size);
-    if (new_ptr == NULL) {
-        return NULL;
-    }
+/*
+ * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ */
+void *mm_realloc(void *ptr, size_t size)
+{
+    void *oldptr = ptr;
+    void *newptr;
+    size_t copySize;
     
-    memcpy(new_ptr, ptr, old_size);
-    mm_free(ptr);
-    return new_ptr;
+    newptr = mm_malloc(size); // 새로운 포인터 기준으로 malloc을 수행한다.
+    if (newptr == NULL)
+      return NULL;
+    copySize = GET_SIZE(HDR_P(oldptr)); // 복사할 사이즈를 (기존 블록의 크기를) 구한다.
+    if (size < copySize) // 블록의 크기보다 새로 할당받은 메모리 길이가 작다면
+      copySize = size;  // 복사할 사이즈를 후자에 맞춘다.
+    memcpy(newptr, oldptr, copySize); // 내용을 덮어쓴다.
+    mm_free(oldptr); // 기존 블록을 free해준다.
+    return newptr;
 }
-
 
 
 
